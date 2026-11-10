@@ -95,7 +95,7 @@ jobs:
       - name: Compile
         shell: bash
         run: |
-          cmake --build build/release --target yuzu yuzu-cmd lichii-updater --parallel 4
+          cmake --build build/release --target yuzu yuzu-cmd --parallel 4
 
       - name: Bundle Qt
         shell: pwsh
