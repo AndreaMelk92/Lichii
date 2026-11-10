@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 
 #include "common/settings.h"
@@ -30,6 +31,16 @@ constexpr auto STABILIZATION_DURATION = std::chrono::seconds(1);
 constexpr auto PROBE_DURATION = std::chrono::seconds(1);
 constexpr auto DEFICIT_DURATION = std::chrono::seconds(1);
 constexpr auto PROBE_STEP_DELAY = std::chrono::milliseconds(250);
+
+// Optional: LICHII_FG_RELAXED_PACER=1 uses more forgiving pacing guards.
+// Without it, the stock frame-generation pacing behaviour is unchanged.
+[[nodiscard]] bool UseRelaxedFgPacer() {
+    static const bool enabled = [] {
+        const char* setting = std::getenv("LICHII_FG_RELAXED_PACER");
+        return setting != nullptr && setting[0] == '1' && setting[1] == '\0';
+    }();
+    return enabled;
+}
 
 [[nodiscard]] Clock::duration ProbeBackoff(u32 failures) {
     switch (failures) {
@@ -72,7 +83,7 @@ FrameGenPlan FrameGenPacer::Plan(size_t capacity) {
     const f32 target_rate = static_cast<f32>(Settings::values.frame_gen_target_rate.GetValue());
 
     if (smoothed_interval > 0.0f) {
-        f32 burst_threshold = BURST_CADENCE_RATIO / smoothed_interval;
+        f32 burst_threshold = (UseRelaxedFgPacer() ? 6.0f : BURST_CADENCE_RATIO) / smoothed_interval;
         if (target_rate > 0.0f) {
             burst_threshold = std::max(burst_threshold, target_rate * BURST_TARGET_RATIO);
         }
@@ -83,7 +94,7 @@ FrameGenPlan FrameGenPacer::Plan(size_t capacity) {
         }
     }
 
-    if (interval_seconds > 1.0f / MINIMUM_BASE_RATE) {
+    if (interval_seconds > 1.0f / (UseRelaxedFgPacer() ? 5.0f : MINIMUM_BASE_RATE)) {
         Stabilize(now);
         return {};
     }
@@ -214,7 +225,8 @@ void FrameGenPacer::DeferEvaluations(Clock::duration amount) {
 }
 
 void FrameGenPacer::Stabilize(Clock::time_point now) {
-    stable_until = now + STABILIZATION_DURATION;
+    stable_until = now + (UseRelaxedFgPacer() ? std::chrono::milliseconds(250)
+                                            : STABILIZATION_DURATION);
     probe_until.reset();
     deficit_since.reset();
     smoothed_interval = 0.0f;
